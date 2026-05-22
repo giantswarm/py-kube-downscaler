@@ -6,7 +6,6 @@
 <a href="https://inviter.co/kube-downscaler" title="Slack Workspace"><img alt="Slack Workspace" src="https://img.shields.io/badge/slack-kube--downscaler-dark_green?style=flat&logo=slack"></a>
 <a target="_blank" href="https://artifacthub.io/packages/helm/py-kube-downscaler/py-kube-downscaler" title="ArtifactHub"><img alt="py-kube-downscaler" src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/py-kube-downscaler"></a>
 
-
 This is a fork of the no longer maintained [hjacobs/kube-downscaler](https://codeberg.org/hjacobs/kube-downscaler).
 
 > [!IMPORTANT]  
