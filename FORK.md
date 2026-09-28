@@ -33,17 +33,21 @@ from one place: **which py-kube-downscaler are we running, and why does it diffe
 ## Publishing
 
 CircleCI (`.circleci/config.yml`) runs upstream's tests on every branch. A push to `giantswarm` publishes a dev build and
-a tag `vX.Y.Z-gs.N` a release to `gsoci.azurecr.io/giantswarm/py-kube-downscaler/kube-downscaler:X.Y.Z-gs.N`, where
-`X.Y.Z` is the pin and `N` counts the line's releases on it. The index carries `io.giantswarm.upstream.version`. Nothing
+a tag `vX.Y.Z` a release to `gsoci.azurecr.io/giantswarm/py-kube-downscaler/kube-downscaler:X.Y.Z`. The index carries
+`io.giantswarm.upstream.version`, the pin.
+
+The line's versions are its own semver, above the pin: the first release is `v26.4.1` (upstream v26.4.0 plus the carried
+patches). A carried patch or a pipeline change is a patch bump, a re-pin at least a minor bump onto a version above the
+new pin. The orb's version computation (gitsemver) knows only bare `vX.Y.Z` tags, so there are no `-gs.N` suffixes. Nothing
 is published from GitHub Actions, by hand, or to ghcr.io. The retagger's mirror of upstream's own images
 (`gsoci.azurecr.io/giantswarm/py-kube-downscaler`) is a different repository and is not used by the chart.
 
-A release is tagged on `giantswarm` after its pull request merged: `git tag -a v26.4.0-gs.N -m "…"` and push the tag.
+A release is tagged on `giantswarm` after its pull request merged: `git tag -a vX.Y.Z -m "…"` and push the tag.
 
 ## Re-pin
 
 1. Fetch upstream's tags and branch `fork/repin-<tag>` from the new tag.
 2. Replay the fork infrastructure commits and every carried patch upstream does not contain; drop the rows of those it
    does.
-3. Update "Pin", the `upstream_annotation` in `.circleci/config.yml`, and the release tag's `X.Y.Z`.
-4. A repository admin moves `giantswarm` to the reviewed branch; tag `vX.Y.Z-gs.1`; bump kube-downscaler-app.
+3. Update "Pin" and the `upstream_annotation` in `.circleci/config.yml`.
+4. A repository admin moves `giantswarm` to the reviewed branch; tag the next minor above the new pin; bump kube-downscaler-app.

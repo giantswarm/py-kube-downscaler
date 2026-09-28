@@ -1,6 +1,6 @@
 # Fork (giantswarm/py-kube-downscaler): the line's CI and publishing pipeline.
 # Every branch runs upstream's test suite. Every push to `giantswarm` publishes
-# a dev build and every release tag (`vX.Y.Z-gs.N`) a release of upstream's
+# a dev build and every release tag (`vX.Y.Z`) a release of upstream's
 # Dockerfile under the line's own path on gsoci:
 #
 #   gsoci.azurecr.io/giantswarm/py-kube-downscaler/kube-downscaler:<version>
@@ -8,7 +8,7 @@
 # The line's own path keeps it apart from the retagger's mirror of upstream's
 # images (gsoci.azurecr.io/giantswarm/py-kube-downscaler). The architect orb's
 # stock `push-to-registries` takes the version from gitsemver (a tag
-# `v26.4.0-gs.1` gives the image tag `26.4.0-gs.1`), builds linux/amd64 and
+# `v26.4.1` gives the image tag `26.4.1`), builds linux/amd64 and
 # linux/arm64, pushes, signs and attests. The image is scanned with Trivy after
 # the push. Nothing is published from GitHub Actions or by hand. FORK.md,
 # "Publishing".
@@ -29,7 +29,7 @@ publish_filters: &publish_filters
   branches:
     only: giantswarm
   tags:
-    only: /^v[0-9]+\.[0-9]+\.[0-9]+-gs\.[0-9]+$/
+    only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
 
 validate_filters: &validate_filters
   branches:
@@ -37,7 +37,7 @@ validate_filters: &validate_filters
 
 all_filters: &all_filters
   tags:
-    only: /^v[0-9]+\.[0-9]+\.[0-9]+-gs\.[0-9]+$/
+    only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
 
 jobs:
   # Upstream's test suite, as upstream's python-tests workflow runs it.
