@@ -184,6 +184,13 @@ metrics API` as there is no Pod to retrieve metrics from.
   condition** where `py-kube-downscaler` scales down the Deployment and HPA
   upscales it as its `minReplicas` is higher.
 
+When `horizontalpodautoscalers` is in `--include-resources`, the downscaler
+avoids this race by itself: a `Deployment`, `StatefulSet` or other workload
+targeted by an HPA is left to the HPA whenever its downtime replicas are
+greater than 0, and only the HPA's `minReplicas` is lowered. HPAs created by a
+KEDA `ScaledObject` are never scaled directly, since KEDA reconciles them;
+include `scaledobjects` to downscale those workloads.
+
 To enable Downscaler on HPA with `--downtime-replicas=1`,
 ensure to add the following annotations to Deployment and HPA.
 

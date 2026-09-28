@@ -2006,3 +2006,160 @@ def test_hpa_annotation_not_cleared_during_downtime(monkeypatch):
     assert hpa.obj["spec"]["minReplicas"] == 1
     assert hpa.obj["metadata"]["annotations"][ORIGINAL_REPLICAS_ANNOTATION] == "5"
 
+
+def test_hpa_target_not_downscaled(monkeypatch):
+    api = MagicMock()
+    deploy = Deployment(
+        api,
+        {
+            "metadata": {
+                "name": "my-deploy",
+                "namespace": "my-ns",
+                "creationTimestamp": "2018-10-23T21:55:00Z",
+            },
+            "spec": {"replicas": 3},
+        },
+    )
+    now = datetime.strptime("2018-10-23T21:56:00Z", "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc
+    )
+    autoscale_resource(
+        deploy,
+        upscale_target_only=False,
+        upscale_period="never",
+        downscale_period="never",
+        default_uptime="never",
+        default_downtime="always",
+        forced_uptime=False,
+        forced_downtime=False,
+        dry_run=True,
+        max_retries_on_conflict=0,
+        api=api,
+        kind=Deployment,
+        now=now,
+        downtime_replicas=1,
+        matching_labels=frozenset([re.compile("")]),
+        hpa_targets=frozenset([("Deployment", "my-ns", "my-deploy")]),
+    )
+    assert deploy.replicas == 3
+    assert ORIGINAL_REPLICAS_ANNOTATION not in deploy.annotations
+
+
+def test_hpa_target_downscaled_to_zero(monkeypatch):
+    # replicas 0 disable the HPA, so scaling the target down is safe
+    api = MagicMock()
+    deploy = Deployment(
+        api,
+        {
+            "metadata": {
+                "name": "my-deploy",
+                "namespace": "my-ns",
+                "creationTimestamp": "2018-10-23T21:55:00Z",
+            },
+            "spec": {"replicas": 3},
+        },
+    )
+    now = datetime.strptime("2018-10-23T21:56:00Z", "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc
+    )
+    autoscale_resource(
+        deploy,
+        upscale_target_only=False,
+        upscale_period="never",
+        downscale_period="never",
+        default_uptime="never",
+        default_downtime="always",
+        forced_uptime=False,
+        forced_downtime=False,
+        dry_run=True,
+        max_retries_on_conflict=0,
+        api=api,
+        kind=Deployment,
+        now=now,
+        downtime_replicas=0,
+        matching_labels=frozenset([re.compile("")]),
+        hpa_targets=frozenset([("Deployment", "my-ns", "my-deploy")]),
+    )
+    assert deploy.replicas == 0
+    assert deploy.annotations[ORIGINAL_REPLICAS_ANNOTATION] == "3"
+
+
+def test_hpa_target_previously_downscaled_is_restored(monkeypatch):
+    api = MagicMock()
+    deploy = Deployment(
+        api,
+        {
+            "metadata": {
+                "name": "my-deploy",
+                "namespace": "my-ns",
+                "creationTimestamp": "2018-10-23T21:55:00Z",
+                "annotations": {ORIGINAL_REPLICAS_ANNOTATION: "3"},
+            },
+            "spec": {"replicas": 1},
+        },
+    )
+    now = datetime.strptime("2018-10-23T21:56:00Z", "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc
+    )
+    autoscale_resource(
+        deploy,
+        upscale_target_only=False,
+        upscale_period="never",
+        downscale_period="never",
+        default_uptime="never",
+        default_downtime="always",
+        forced_uptime=False,
+        forced_downtime=False,
+        dry_run=True,
+        max_retries_on_conflict=0,
+        api=api,
+        kind=Deployment,
+        now=now,
+        downtime_replicas=1,
+        matching_labels=frozenset([re.compile("")]),
+        hpa_targets=frozenset([("Deployment", "my-ns", "my-deploy")]),
+    )
+    assert deploy.replicas == 3
+    assert deploy.annotations[ORIGINAL_REPLICAS_ANNOTATION] is None
+
+
+def test_excluded_hpa_with_scaledobject_original_replicas_not_upscaled(monkeypatch):
+    # KEDA copies the ScaledObject's annotations, "-1" included, onto its HPA
+    api = MagicMock()
+    hpa = HorizontalPodAutoscaler(
+        api,
+        {
+            "metadata": {
+                "name": "keda-hpa-my-so",
+                "namespace": "my-ns",
+                "creationTimestamp": "2018-10-23T21:55:00Z",
+                "annotations": {
+                    EXCLUDE_ANNOTATION: "true",
+                    ORIGINAL_REPLICAS_ANNOTATION: "-1",
+                },
+            },
+            "spec": {"minReplicas": 1, "maxReplicas": 5},
+        },
+    )
+    now = datetime.strptime("2018-10-23T21:56:00Z", "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc
+    )
+    autoscale_resource(
+        hpa,
+        upscale_target_only=False,
+        upscale_period="never",
+        downscale_period="never",
+        default_uptime="always",
+        default_downtime="never",
+        forced_uptime=False,
+        forced_downtime=False,
+        dry_run=False,
+        max_retries_on_conflict=0,
+        api=api,
+        kind=HorizontalPodAutoscaler,
+        now=now,
+        downtime_replicas=1,
+        matching_labels=frozenset([re.compile("")]),
+    )
+    assert hpa.obj["spec"]["minReplicas"] == 1
+    api.patch.assert_not_called()
