@@ -44,9 +44,18 @@ is published from GitHub Actions, by hand, or to ghcr.io. The retagger's mirror 
 
 A release is tagged on `giantswarm` after its pull request merged: `git tag -a vX.Y.Z -m "…"` and push the tag.
 
+| Release | Pin | Carries |
+|---|---|---|
+| `v26.4.1` (2026-09-28) | upstream v26.4.0 | HPA-aware downscaling, the image security fixes |
+
+The line's version numbers can match a later upstream release (upstream may tag its own v26.4.1). They are different
+artifacts: this table and the image's `io.giantswarm.upstream.version` annotation say which upstream a line release
+carries, and the line's images live under their own path. A re-pin fetches upstream's tags into their own namespace
+(`git fetch upstream 'refs/tags/*:refs/tags/upstream/*'`), so they never overwrite the line's tags.
+
 ## Re-pin
 
-1. Fetch upstream's tags and branch `fork/repin-<tag>` from the new tag.
+1. Fetch upstream's tags (`refs/tags/upstream/*`, above) and branch `fork/repin-<tag>` from the new tag.
 2. Replay the fork infrastructure commits and every carried patch upstream does not contain; drop the rows of those it
    does.
 3. Update "Pin" and the `upstream_annotation` in `.circleci/config.yml`.
