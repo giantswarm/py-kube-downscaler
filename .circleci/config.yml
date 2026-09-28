@@ -1,0 +1,114 @@
+# Fork (giantswarm/py-kube-downscaler): the line's CI and publishing pipeline.
+# Every branch runs upstream's test suite. Every push to `giantswarm` publishes
+# a dev build and every release tag (`vX.Y.Z-gs.N`) a release of upstream's
+# Dockerfile under the line's own path on gsoci:
+#
+#   gsoci.azurecr.io/giantswarm/py-kube-downscaler/kube-downscaler:<version>
+#
+# The line's own path keeps it apart from the retagger's mirror of upstream's
+# images (gsoci.azurecr.io/giantswarm/py-kube-downscaler). The architect orb's
+# stock `push-to-registries` takes the version from gitsemver (a tag
+# `v26.4.0-gs.1` gives the image tag `26.4.0-gs.1`), builds linux/amd64 and
+# linux/arm64, pushes, signs and attests. The image is scanned with Trivy after
+# the push. Nothing is published from GitHub Actions or by hand. FORK.md,
+# "Publishing".
+version: 2.1
+
+orbs:
+  architect: giantswarm/architect@10.10.0
+
+# The upstream release the line is pinned to (FORK.md, "Pin"), stamped on every
+# published index.
+upstream_annotation: &upstream_annotation |
+  index:io.giantswarm.upstream.version=v26.4.0
+
+build_args: &build_args |
+  VERSION=${DOCKER_IMAGE_TAG}
+
+publish_filters: &publish_filters
+  branches:
+    only: giantswarm
+  tags:
+    only: /^v[0-9]+\.[0-9]+\.[0-9]+-gs\.[0-9]+$/
+
+validate_filters: &validate_filters
+  branches:
+    ignore: giantswarm
+
+all_filters: &all_filters
+  tags:
+    only: /^v[0-9]+\.[0-9]+\.[0-9]+-gs\.[0-9]+$/
+
+jobs:
+  # Upstream's test suite, as upstream's python-tests workflow runs it.
+  test:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install
+          command: pip install poetry && poetry install --no-interaction
+      - run:
+          name: Test
+          command: poetry run pytest tests/
+
+  # A fixable HIGH or CRITICAL finding fails the pipeline; time-box it in
+  # .trivyignore with an expiry when upstream has no fix. The image is public,
+  # no login needed. Trivy runs as a container on the remote Docker host, which
+  # a bind mount of the checkout does not reach, so .trivyignore is copied in.
+  scan:
+    executor: architect/architect
+    resource_class: small
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - setup_remote_docker:
+          version: default
+      - run:
+          name: Scan
+          command: |
+            set -o errexit -o nounset -o pipefail
+            test -s .build_version
+            ref="gsoci.azurecr.io/giantswarm/py-kube-downscaler/kube-downscaler:$(cat .build_version)"
+            echo "scanning ${ref}"
+            container="$(docker create \
+              --env TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2 \
+              gsoci.azurecr.io/giantswarm/trivy:0.74.0 \
+              image --severity CRITICAL,HIGH --ignore-unfixed --ignorefile /.trivyignore \
+              --exit-code 1 --format table "${ref}")"
+            docker cp .trivyignore "${container}:/.trivyignore"
+            docker start --attach "${container}"
+
+workflows:
+  publish:
+    jobs:
+      - test:
+          filters: *all_filters
+      - architect/push-to-registries:
+          context: architect
+          name: push-to-registries
+          image: giantswarm/py-kube-downscaler/kube-downscaler
+          platforms: linux/amd64,linux/arm64
+          build-args: *build_args
+          annotations: *upstream_annotation
+          requires:
+            - test
+          filters: *publish_filters
+      - scan:
+          requires:
+            - push-to-registries
+          filters: *publish_filters
+
+  # Pull-request branches: the same build, nothing pushed.
+  validate:
+    jobs:
+      - architect/push-to-registries:
+          name: validate-image
+          image: giantswarm/py-kube-downscaler/kube-downscaler
+          platforms: linux/amd64,linux/arm64
+          build-args: *build_args
+          push: false
+          filters: *validate_filters
