@@ -4554,6 +4554,7 @@ def test_scaler_upscale_hpa_original_replicas_gt_max_replicas(
     }
     assert json.loads(api.patch.call_args[1]["data"]) == patch_data
 
+
 def test_scaler_upscale_hpa_original_replicas_lte_max_replicas(
     monkeypatch,
 ):
@@ -4640,3 +4641,129 @@ def test_scaler_upscale_hpa_original_replicas_lte_max_replicas(
         "spec": {"maxReplicas": 3, "minReplicas": 1},
     }
     assert json.loads(api.patch.call_args[1]["data"]) == patch_data
+
+def test_scaler_downscales_hpa_not_its_target(monkeypatch):
+    api = MagicMock()
+    monkeypatch.setattr("kube_downscaler.helper.MAX_RETRIES", 0, raising=False)
+    monkeypatch.setattr("kube_downscaler.helper.TOKEN_BUCKET", None, raising=False)
+    monkeypatch.setattr(
+        "kube_downscaler.scaler.helper.get_kube_api", MagicMock(return_value=api)
+    )
+
+    def get(url, version, **kwargs):
+        if url == "pods":
+            data = {"items": []}
+        elif url == "deployments":
+            data = {
+                "items": [
+                    {
+                        "metadata": {
+                            "name": "hpa-target",
+                            "namespace": "default",
+                            "creationTimestamp": "2019-03-01T16:38:00Z",
+                        },
+                        "spec": {"replicas": 3},
+                    },
+                    {
+                        "metadata": {
+                            "name": "keda-target",
+                            "namespace": "default",
+                            "creationTimestamp": "2019-03-01T16:38:00Z",
+                        },
+                        "spec": {"replicas": 3},
+                    },
+                    {
+                        "metadata": {
+                            "name": "plain",
+                            "namespace": "default",
+                            "creationTimestamp": "2019-03-01T16:38:00Z",
+                        },
+                        "spec": {"replicas": 3},
+                    },
+                ]
+            }
+        elif url == "horizontalpodautoscalers":
+            data = {
+                "items": [
+                    {
+                        "metadata": {
+                            "name": "my-hpa",
+                            "namespace": "default",
+                            "creationTimestamp": "2019-03-01T16:38:00Z",
+                        },
+                        "spec": {
+                            "minReplicas": 3,
+                            "maxReplicas": 6,
+                            "scaleTargetRef": {
+                                "apiVersion": "apps/v1",
+                                "kind": "Deployment",
+                                "name": "hpa-target",
+                            },
+                        },
+                    },
+                    {
+                        "metadata": {
+                            "name": "keda-hpa-my-so",
+                            "namespace": "default",
+                            "creationTimestamp": "2019-03-01T16:38:00Z",
+                            "ownerReferences": [
+                                {
+                                    "apiVersion": "keda.sh/v1alpha1",
+                                    "kind": "ScaledObject",
+                                    "name": "my-so",
+                                    "controller": True,
+                                }
+                            ],
+                        },
+                        "spec": {
+                            "minReplicas": 3,
+                            "maxReplicas": 6,
+                            "scaleTargetRef": {
+                                "apiVersion": "apps/v1",
+                                "kind": "Deployment",
+                                "name": "keda-target",
+                            },
+                        },
+                    },
+                ]
+            }
+        elif url == "namespaces/default":
+            data = {"metadata": {}}
+        elif url == "namespaces":
+            data = {"items": [{"metadata": {"name": "default"}}]}
+        else:
+            raise Exception(f"unexpected call: {url}, {version}, {kwargs}")
+
+        response = MagicMock()
+        response.json.return_value = data
+        return response
+
+    api.get = get
+
+    scale(
+        constrained_downscaler=False,
+        namespaces=[],
+        upscale_period="never",
+        downscale_period="never",
+        default_uptime="never",
+        default_downtime="always",
+        upscale_target_only=False,
+        include_resources=frozenset(["deployments", "horizontalpodautoscalers"]),
+        exclude_namespaces=[],
+        exclude_deployments=[],
+        matching_labels=frozenset([re.compile("")]),
+        dry_run=False,
+        api_server_timeout=10,
+        max_retries_on_conflict=0,
+        grace_period=300,
+        admission_controller="",
+        downtime_replicas=1,
+    )
+
+    patched = {
+        json.loads(call[1]["data"])["metadata"]["name"]: json.loads(call[1]["data"])
+        for call in api.patch.call_args_list
+    }
+    assert set(patched) == {"plain", "my-hpa"}
+    assert patched["plain"]["spec"]["replicas"] == 1
+    assert patched["my-hpa"]["spec"]["minReplicas"] == 1
