@@ -15,6 +15,9 @@ RUN poetry config virtualenvs.create false && \
 
 FROM python:3.12.13-alpine3.23
 
+# pick up the Alpine security fixes released since the base image was built
+RUN apk upgrade --no-cache
+
 WORKDIR /
 
 # copy pre-built packages to this image
