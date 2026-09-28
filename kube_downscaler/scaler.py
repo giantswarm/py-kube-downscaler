@@ -434,6 +434,46 @@ def is_stack_deployment(resource: NamespacedAPIObject) -> bool:
     return False
 
 
+def is_scaled_object_hpa(resource: NamespacedAPIObject) -> bool:
+    # KEDA creates and reconciles the HPA of a ScaledObject and copies the
+    # ScaledObject's annotations onto it, we will downscale the ScaledObject instead
+    if resource.kind == HorizontalPodAutoscaler.kind:
+        for owner_ref in resource.metadata.get("ownerReferences", []):
+            if owner_ref["kind"] == ScaledObject.kind and owner_ref[
+                "apiVersion"
+            ].startswith("keda.sh/"):
+                return True
+    return False
+
+
+def get_hpa_targets(
+    api, namespaces: FrozenSet[str], exclude_namespaces: FrozenSet[Pattern]
+) -> FrozenSet[Tuple[str, str, str]]:
+    """Return (kind, namespace, name) of every workload an HPA scales."""
+    hpas, _ = get_resources(
+        HorizontalPodAutoscaler, api, namespaces, exclude_namespaces
+    )
+    return frozenset(
+        (
+            hpa.obj["spec"]["scaleTargetRef"]["kind"],
+            hpa.namespace,
+            hpa.obj["spec"]["scaleTargetRef"]["name"],
+        )
+        for hpa in hpas
+        if "scaleTargetRef" in hpa.obj.get("spec", {})
+    )
+
+
+def has_original_replicas(
+    resource: NamespacedAPIObject, original_replicas: Optional[int]
+) -> bool:
+    # -1 marks a ScaledObject that had no pause annotation, it is no replica count
+    return bool(original_replicas) and (
+        original_replicas > 0
+        or (original_replicas == -1 and resource.kind == ScaledObject.kind)
+    )
+
+
 def ignore_if_labels_dont_match(
     resource: NamespacedAPIObject, labels: FrozenSet[Pattern]
 ) -> bool:
@@ -1149,6 +1189,7 @@ def autoscale_resource(
     deployment_time_annotation: Optional[str] = None,
     enable_events: bool = False,
     matching_labels: FrozenSet[Pattern] = frozenset(),
+    hpa_targets: FrozenSet[Tuple[str, str, str]] = frozenset(),
 ):
     try:
         exclude = (
@@ -1172,6 +1213,17 @@ def autoscale_resource(
             is_downtime_replicas_percentage = (
                 is_downtime_replicas_from_annotation_percentage
             )
+
+        if (
+            downtime_replicas > 0
+            and (resource.kind, resource.namespace, resource.name) in hpa_targets
+        ):
+            # the HPA owns the replicas and would scale them straight back up,
+            # we will downscale the HPA's minReplicas instead
+            logger.debug(
+                f"{resource.kind} {resource.namespace}/{resource.name} is scaled by a HorizontalPodAutoscaler, downscaling the HorizontalPodAutoscaler instead"
+            )
+            exclude = True
 
         exclude_condition = define_scope(
             exclude, original_replicas, upscale_target_only
@@ -1232,8 +1284,7 @@ def autoscale_resource(
                 not ignore
                 and is_uptime
                 and replicas == downtime_replicas
-                and original_replicas
-                and (original_replicas > 0 or original_replicas == -1)
+                and has_original_replicas(resource, original_replicas)
             ):
                 try:
                     scale_up(
@@ -1253,8 +1304,7 @@ def autoscale_resource(
             elif (
                 not ignore
                 and is_uptime
-                and original_replicas
-                and (original_replicas > 0 or original_replicas == -1)
+                and has_original_replicas(resource, original_replicas)
                 and replicas == original_replicas
                 and replicas != downtime_replicas
             ):
@@ -1385,6 +1435,7 @@ def autoscale_resources(
     is_downtime_replicas_percentage: bool,
     deployment_time_annotation: Optional[str] = None,
     enable_events: bool = False,
+    hpa_targets: FrozenSet[Tuple[str, str, str]] = frozenset(),
 ):
     resources_by_namespace = collections.defaultdict(list)
     resources, exclude_namespaces = get_resources(
@@ -1401,6 +1452,11 @@ def autoscale_resources(
             if resource.kind == "Job" and "ownerReferences" in resource.metadata:
                 logger.debug(
                     f"{resource.kind} {resource.namespace}/{resource.name} was excluded (Job with ownerReferences)"
+                )
+                continue
+            if is_scaled_object_hpa(resource):
+                logger.debug(
+                    f"{resource.kind} {resource.namespace}/{resource.name} was excluded (managed by a KEDA ScaledObject)"
                 )
                 continue
             resources_by_namespace[resource.namespace].append(resource)
@@ -1509,6 +1565,7 @@ def autoscale_resources(
                 deployment_time_annotation=deployment_time_annotation,
                 enable_events=enable_events,
                 matching_labels=matching_labels,
+                hpa_targets=hpa_targets,
             )
 
 
@@ -1819,6 +1876,11 @@ def scale(
     now = datetime.datetime.now(datetime.timezone.utc)
     namespace_to_namespace_obj = get_namespace_to_namespace_obj(api, namespaces)
     forced_uptime = pods_force_uptime(api, namespaces)
+    hpa_targets = (
+        get_hpa_targets(api, namespaces, exclude_namespaces)
+        if HorizontalPodAutoscaler.endpoint in include_resources
+        else frozenset()
+    )
 
     for clazz in RESOURCE_CLASSES:
         plural = clazz.endpoint
@@ -1852,6 +1914,7 @@ def scale(
                     is_downtime_replicas_percentage,
                     deployment_time_annotation,
                     enable_events,
+                    hpa_targets,
                 )
             else:
                 autoscale_jobs(
