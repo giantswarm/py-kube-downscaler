@@ -1,3 +1,5 @@
+> **Giant Swarm line.** This is Team Planeteers' fork of caas-team/py-kube-downscaler; see [FORK.md](FORK.md) for the pin, the carried patches and publishing.
+
 # Python Kubernetes Downscaler
 
 <a href="/../../releases/" title="GitHub Release"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/caas-team/py-kube-downscaler?style=flat"></a>

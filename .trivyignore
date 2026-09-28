@@ -1,0 +1,3 @@
+# Time-boxed exceptions for the scan job in .circleci/config.yml, one CVE per
+# line with its expiry (`CVE-… exp:YYYY-MM-DD`) and the reason. Empty: the
+# published image has no fixable HIGH or CRITICAL finding to accept.
