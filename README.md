@@ -56,7 +56,7 @@ Scale down / "pause" Kubernetes workload (`Deployments`, `StatefulSets`,
 
 > :memo: `Deployments` are interchangeable by any kind of _supported workload_ for this whole guide unless explicitly stated otherwise.
 >
-> The complete list of supported workload is defined [here](./kube_downscaler/scaler.py#9-14).
+> The complete list of supported workload is defined [here](./kube_downscaler/scaler.py#L56-L67).
 
 ### Algorithm
 
